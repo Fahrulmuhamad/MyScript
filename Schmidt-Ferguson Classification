@@ -1,0 +1,142 @@
+var CHRIPS = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY");
+var col = CHRIPS.filterDate('1989-1-1','2018-12-31')
+var aoi = ee.FeatureCollection("USDOS/LSIB/2013").filter(ee.Filter.stringContains('name', 'INDONESIA'))
+var point = ee.Geometry.Point([112.97500405423875, -0.13278898880881343]).buffer(500)
+var point2 = ee.Geometry.Point([120.41307810984881, -9.820054989159742]).buffer(500)
+var year = ee.List.sequence(1989,2018)
+var month = ee.List.sequence(1,12)
+
+//Calculate Mean Monthly Precipitation
+var filmy = function(m){
+  m = ee.Number(m)
+  var filyear = ee.ImageCollection(year.map(function(y){
+      var filmont = col.filter(ee.Filter.calendarRange(m,m,'month')).
+      filter(ee.Filter.calendarRange(y,y,'year'))
+      return filmont.sum()
+  }))
+  var time = ee.Date.fromYMD(1,m,1)
+  time = ee.Number.parse(time.format('MM'))
+  return filyear.mean().rename('Mean Monthly Data').set('index',time)//ee.Number(m).add(10))
+}
+var monthly =ee.ImageCollection(month.map(filmy))
+
+//Determine Amount Dry Month
+var dry = monthly.map(function(m){
+  var dm = m.expression(
+    "(b(0) <= 60 ) ?1" +
+      ": 0" )
+  return dm
+})
+var sumdry = dry.sum().clip(aoi)
+
+//Determine Amount Wet Month
+var wet = monthly.map(function(m){
+  var wm = m.expression(
+    "(b(0) >= 100 ) ?1" +
+      ": 0" )
+  return wm
+})
+var sumwet = wet.sum().clip(aoi)
+
+//Determine Schmidt Fergusson Index
+var Q = (sumdry.divide(sumwet)).clip(aoi)
+
+//Classificarion SF
+var SF = Q.expression(
+    "(b(0) < 0.143 && b(0)>=0 ) ? 1" + //A
+      ": (b(0) < 0.333 && b(0) >= 0.143) ? 2" + //B
+        ": (b(0) < 0.6 && b(0) >= 0.333) ? 3" + //C
+          ": (b(0) < 1 && b(0) >= 0.6) ? 4" + //D
+            ": (b(0) < 1.67 && b(0) >= 1) ? 5" + //E
+              ": (b(0) < 3 && b(0) >= 1.67) ? 6" + //F
+                ": (b(0) < 8 && b(0) >= 3) ? 7" + //G
+                  ": 8" ).clip(aoi)//H
+
+Map.centerObject(aoi)
+//print(monthly.getInfo())
+
+
+//Mean Monthly Central Kalimantan
+var options = {
+  title: 'Central Kalimantan Mean Monthly Precipitation',
+  hAxis: {title: 'Month'},
+  vAxis: {title: 'Precipitation (mm/month)'}
+}
+print(ui.Chart.image.series(monthly, point, ee.Reducer.mean(), 30, 'index')
+.setChartType('ColumnChart').setOptions(options))
+
+//mean Monthly East Nusa Tenggara
+var options2 = {
+  title: 'East Nusa Tenggara Mean Monthly Precipitation',
+  hAxis: {title: 'Month'},
+  vAxis: {title: 'Precipitation (mm/month)'}
+}
+print(ui.Chart.image.series(monthly, point2, ee.Reducer.mean(), 30, 'index')
+.setChartType('ColumnChart').setOptions(options2))
+
+
+// set position of panel
+var legend = ui.Panel({
+  style: {
+    position: 'bottom-left',
+    padding: '8px 20px'
+  }
+});
+ 
+// Create legend title
+var legendTitle = ui.Label({
+  value: 'Schmidt-Ferguson Classification',
+  style: {
+    fontWeight: 'bold',
+    fontSize: '18px',
+    margin: '0 0 4px 0',
+    padding: '0'
+    }
+});
+ 
+// Add the title to the panel
+legend.add(legendTitle);
+ 
+// Creates and styles 1 row of the legend.
+var makeRow = function(color, name) {
+ 
+      // Create the label that is actually the colored box.
+      var colorBox = ui.Label({
+        style: {
+          backgroundColor: '#' + color,
+          // Use padding to give the box height and width.
+          padding: '8px',
+          margin: '0 0 4px 0'
+        }
+      });
+ 
+      // Create the label filled with the description text.
+      var description = ui.Label({
+        value: name,
+        style: {margin: '0 0 4px 6px'}
+      });
+ 
+      // return the panel
+      return ui.Panel({
+        widgets: [colorBox, description],
+        layout: ui.Panel.Layout.Flow('horizontal')
+      });
+};
+ 
+//  Palette with the colors
+var palette =["0c35ff","12a7ff","27ffeb","3fff9d","bdff54","fff256","ffb649","d66935"];
+ 
+// name of the legend
+var names = ['A (Very Wet)','B (Wet)','C (Medium Wet)','D (Medium)','E (Medium Dry)','F (Dry)','G (Very Dry)','H (Extremely Dry)']
+ 
+// Add color and and names
+for (var i = 0; i < 8; i++) {
+  legend.add(makeRow(palette[i], names[i]));
+  }  
+ 
+// add legend to map (alternatively you can also print the legend to the console)
+Map.add(legend);
+
+//Map.addLayer(sumdry,dryVP,'Amount Dry Month')
+//Map.addLayer(sumwet,wetVP,'Amount Wet Month')
+Map.addLayer(SF,SFVP,'Schmidt Fergusson')
